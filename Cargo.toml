@@ -25,7 +25,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 syntect = "5"
 
 # Phase 6: AST analysis (libclang)
-# clang-sys = { version = "1", features = ["clang_17_0"] }
+clang-sys = { version = "1", features = ["clang_18_0", "runtime"] }
 
 # Utilities
 log = "0.4"

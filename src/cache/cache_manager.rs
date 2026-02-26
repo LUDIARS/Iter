@@ -186,3 +186,75 @@ impl Drop for CacheManager {
         self.close();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn in_memory_cache() -> CacheManager {
+        let mut cache = CacheManager::new();
+        cache.open(":memory:");
+        cache
+    }
+
+    #[test]
+    fn test_open_and_create_tables() {
+        let cache = in_memory_cache();
+        assert!(cache.conn.is_some());
+    }
+
+    #[test]
+    fn test_ast_cache_roundtrip() {
+        let cache = in_memory_cache();
+
+        assert!(!cache.has_ast_cache("test.cpp", 1000, 42));
+
+        cache.store_ast_cache("test.cpp", 1000, 42, b"serialized_ast_data");
+        assert!(cache.has_ast_cache("test.cpp", 1000, 42));
+        assert!(!cache.has_ast_cache("test.cpp", 999, 42));
+
+        let data = cache.load_ast_cache("test.cpp").unwrap();
+        assert_eq!(data, b"serialized_ast_data");
+
+        assert!(cache.load_ast_cache("nonexistent.cpp").is_none());
+    }
+
+    #[test]
+    fn test_asm_cache_roundtrip() {
+        let cache = in_memory_cache();
+
+        cache.store_asm_cache("test.o", 500, b"asm_data");
+        assert!(cache.has_asm_cache("test.o", 500));
+        assert!(!cache.has_asm_cache("test.o", 501));
+
+        let data = cache.load_asm_cache("test.o").unwrap();
+        assert_eq!(data, b"asm_data");
+    }
+
+    #[test]
+    fn test_layout_cache_roundtrip() {
+        let cache = in_memory_cache();
+
+        cache.store_layout("hash123", r#"{"nodes":[]}"#);
+        let layout = cache.load_layout("hash123").unwrap();
+        assert_eq!(layout, r#"{"nodes":[]}"#);
+
+        assert!(cache.load_layout("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_cache_invalidation() {
+        let cache = in_memory_cache();
+
+        cache.store_ast_cache("file.cpp", 100, 1, b"old");
+        assert!(cache.has_ast_cache("file.cpp", 100, 1));
+
+        // Update with new mtime (simulates file change)
+        cache.store_ast_cache("file.cpp", 200, 1, b"new");
+        assert!(!cache.has_ast_cache("file.cpp", 100, 1));
+        assert!(cache.has_ast_cache("file.cpp", 200, 1));
+
+        let data = cache.load_ast_cache("file.cpp").unwrap();
+        assert_eq!(data, b"new");
+    }
+}
