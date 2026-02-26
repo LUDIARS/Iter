@@ -1,0 +1,34 @@
+[package]
+name = "relay-editor"
+version = "0.1.0"
+edition = "2021"
+description = "Relay Graph Editor - Compiler error visualization as relational graph"
+license = "MIT"
+
+[[bin]]
+name = "relay-editor"
+path = "src/main.rs"
+
+[dependencies]
+# Phase 1: Window + Rendering
+cairo-rs = { version = "0.20", features = ["xlib"] }
+cairo-sys-rs = { version = "0.20", features = ["xlib"] }
+x11 = { version = "2.21", features = ["xlib"] }
+
+# Phase 5: Error parsing
+regex = "1"
+
+# Phase 7: Cache
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Phase 3: Syntax highlighting (Scintilla replacement)
+syntect = "5"
+
+# Phase 6: AST analysis (libclang)
+# clang-sys = { version = "1", features = ["clang_17_0"] }
+
+# Utilities
+log = "0.4"
+env_logger = "0.11"
+
+[dev-dependencies]
