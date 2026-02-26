@@ -132,6 +132,7 @@ fn main() {
         let dt = now.duration_since(last_time).as_secs_f64() * 1000.0;
         last_time = now;
 
+        graph_view.set_view_size(window.width() as f64, window.height() as f64);
         graph_view.update(dt);
 
         // Render
