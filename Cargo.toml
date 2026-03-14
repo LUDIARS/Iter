@@ -10,10 +10,11 @@ name = "relay-editor"
 path = "src/main.rs"
 
 [dependencies]
-# Phase 1: Window + Rendering
-cairo-rs = { version = "0.20", features = ["xlib"] }
-cairo-sys-rs = { version = "0.20", features = ["xlib"] }
-x11 = { version = "2.21", features = ["xlib"] }
+# Phase 1: Window + Rendering (cross-platform)
+winit = "0.30"
+softbuffer = "0.4"
+tiny-skia = "0.11"
+fontdue = "0.9"
 
 # Phase 5: Error parsing
 regex = "1"

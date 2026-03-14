@@ -12,8 +12,8 @@ use core::types::*;
 use graph::graph_layout::GraphLayout;
 use graph::graph_view::GraphView;
 use platform::renderer::Renderer;
-use platform::renderer_cairo::RendererCairo;
-use platform::window_x11::WindowX11;
+use platform::renderer_soft::RendererSoft;
+use platform::window::{run_window, WindowState};
 use std::io::Read;
 use std::time::Instant;
 
@@ -86,22 +86,8 @@ fn main() {
     let layout = GraphLayout::new();
     layout.auto_layout(&mut graph);
 
-    // Create window
-    let mut window = WindowX11::new();
-    if !window.create(1280, 720, "Relay Graph Editor") {
-        eprintln!("Failed to create X11 window");
-        std::process::exit(1);
-    }
-
     // Create renderer
-    let cr = match window.create_cairo_context() {
-        Some(cr) => cr,
-        None => {
-            eprintln!("Failed to create Cairo context");
-            std::process::exit(1);
-        }
-    };
-    let mut renderer = RendererCairo::new(cr);
+    let mut renderer = RendererSoft::new(1280, 720);
 
     // Set up graph view
     let mut graph_view = GraphView::new();
@@ -109,22 +95,18 @@ fn main() {
 
     let mut last_time = Instant::now();
 
-    // Main loop
-    loop {
-        if !window.poll_events() {
-            break;
-        }
-
+    // Run the event loop
+    run_window("Relay Graph Editor", 1280, 720, move |state: &mut WindowState| {
         // Dispatch events to graph view
-        for event in window.take_mouse_events() {
-            graph_view.handle_mouse(&event);
+        for event in &state.mouse_events {
+            graph_view.handle_mouse(event);
         }
-        for event in window.take_key_events() {
+        for event in &state.key_events {
             // Ctrl+Q: quit
             if event.pressed && event.ctrl && event.keycode == 24 {
-                break;
+                return false;
             }
-            graph_view.handle_key(&event);
+            graph_view.handle_key(event);
         }
 
         // Delta time
@@ -132,28 +114,24 @@ fn main() {
         let dt = now.duration_since(last_time).as_secs_f64() * 1000.0;
         last_time = now;
 
-        graph_view.set_view_size(window.width() as f64, window.height() as f64);
+        graph_view.set_view_size(state.width as f64, state.height as f64);
         graph_view.update(dt);
 
         // Render
-        if let Some(cr) = window.create_cairo_context() {
-            renderer.set_context(cr);
-        }
-
-        renderer.begin_frame(window.width(), window.height());
+        renderer.begin_frame(state.width as i32, state.height as i32);
         renderer.fill_rect(
             0.0,
             0.0,
-            window.width() as f64,
-            window.height() as f64,
+            state.width as f64,
+            state.height as f64,
             Color::from_hex(config::BG_COLOR, 1.0),
         );
         graph_view.render(&renderer);
         renderer.end_frame();
 
-        window.flush();
+        // Copy rendered pixels to window buffer
+        renderer.copy_to_buffer(&mut state.pixel_buffer);
 
-        // Cap at ~60fps
-        std::thread::sleep(std::time::Duration::from_millis(16));
-    }
+        true
+    });
 }
