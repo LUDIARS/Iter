@@ -3,6 +3,7 @@ mod compile_db;
 mod lsp;
 mod lsp_commands;
 mod project;
+mod snippet;
 mod stack_trace;
 mod window;
 
@@ -23,11 +24,13 @@ pub fn run() {
             project::refresh_project,
             window::open_file_window,
             window::open_at,
+            window::close_other_windows,
             lsp_commands::lsp_open_project,
             lsp_commands::lsp_open_file,
             lsp_commands::lsp_call_hierarchy,
             lsp_commands::lsp_references,
             stack_trace::parse_stack_trace,
+            snippet::read_snippet,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -101,6 +101,21 @@ export const win = {
       followDefinition: followDefinition ?? null,
     });
   },
+  async closeOthers(exceptLabel: string): Promise<number> {
+    return invoke<number>("close_other_windows", { exceptLabel });
+  },
+};
+
+export interface Snippet {
+  start_line: number;
+  target_line: number;
+  lines: string[];
+}
+
+export const fs = {
+  async readSnippet(path: string, line: number, context: number): Promise<Snippet> {
+    return invoke<Snippet>("read_snippet", { path, line, context });
+  },
 };
 
 /** uri から OS パスへの変換 (`file:///c:/foo` → `c:/foo`)。Windows / Unix 両対応。 */

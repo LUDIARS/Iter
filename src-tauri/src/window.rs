@@ -105,6 +105,25 @@ fn label_for(path: &str) -> String {
     format!("file-{:x}", h.finish())
 }
 
+/// 指定 label 以外の `file-*` ラベルを持つウィンドウを全て閉じる。
+/// Control Panel (`control-panel`) は対象外。
+#[tauri::command]
+pub async fn close_other_windows(app: AppHandle, except_label: String) -> Result<u32, String> {
+    let windows = app.webview_windows();
+    let mut closed = 0u32;
+    for (label, w) in windows.iter() {
+        if label == &except_label {
+            continue;
+        }
+        if !label.starts_with("file-") {
+            continue;
+        }
+        let _ = w.close();
+        closed += 1;
+    }
+    Ok(closed)
+}
+
 fn encode_query(s: &str) -> String {
     // `URLSearchParams` 互換のシンプルな %-encode (空白は %20)
     let mut out = String::with_capacity(s.len());

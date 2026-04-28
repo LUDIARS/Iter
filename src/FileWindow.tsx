@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type * as Monaco from "monaco-editor";
-import { lsp, type CallHierarchyResult, type LspLocation } from "./lsp";
+import { lsp, win, type CallHierarchyResult, type LspLocation } from "./lsp";
 import { RelationGraph, type RelationData } from "./RelationGraph";
 
 interface Props {
@@ -248,6 +249,31 @@ export function FileWindow({ path, initialLine, initialCol, followDefinition }: 
     return () => window.removeEventListener("keydown", onKey);
   }, [save]);
 
+  // Ctrl+Shift+W: 自分以外の File Window を全部閉じる
+  useEffect(() => {
+    const onKey = async (e: KeyboardEvent) => {
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        e.shiftKey &&
+        e.key.toLowerCase() === "w"
+      ) {
+        e.preventDefault();
+        try {
+          const myLabel = getCurrentWebviewWindow().label;
+          const closed = await win.closeOthers(myLabel);
+          if (closed > 0) {
+            // ささやかに通知
+            console.log(`Iter: closed ${closed} other window(s)`);
+          }
+        } catch (err) {
+          console.error("close-others failed:", err);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   if (!path) {
     return <div className="fw-error">path クエリが指定されていません</div>;
   }
@@ -282,6 +308,16 @@ export function FileWindow({ path, initialLine, initialCol, followDefinition }: 
           </button>
           <button onClick={save} title="Ctrl+S">
             保存
+          </button>
+          <button
+            onClick={async () => {
+              const myLabel = getCurrentWebviewWindow().label;
+              await win.closeOthers(myLabel);
+            }}
+            title="他の Iter ファイルウィンドウを全部閉じる (Ctrl+Shift+W)"
+            style={{ fontSize: "0.75rem" }}
+          >
+            他を閉じる
           </button>
         </div>
       </header>
