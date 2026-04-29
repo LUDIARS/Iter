@@ -54,4 +54,6 @@ npm run tauri dev
 
 ## ライセンス
 
-LICENSE 参照。
+- Iter 本体: MIT (詳細は [LICENSE](LICENSE))
+- 依存ライブラリの帰属表示: [NOTICE](NOTICE)
+- 第三者ライセンス目録: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)
