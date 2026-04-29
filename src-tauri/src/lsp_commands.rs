@@ -162,6 +162,11 @@ fn guess_language_id(path: &str) -> String {
         || lower.ends_with(".hxx")
     {
         "cpp".to_string()
+    } else if lower.ends_with(".cs") {
+        // C# は clangd の対象外。Monaco 側の syntax highlighting 用に "csharp" を返すが、
+        // lsp_open_file が呼ばれるのは clangd 起動成功後のみなので、Csproj/Sln の場合は
+        // そもそもこのパスを通らない (frontend 側でガード)。
+        "csharp".to_string()
     } else {
         "plaintext".to_string()
     }

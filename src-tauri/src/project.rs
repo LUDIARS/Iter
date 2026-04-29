@@ -28,11 +28,17 @@ impl From<std::io::Error> for ProjectError {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BuildSystem {
+    /// CMakeLists.txt — clangd を直接起動 (compile_commands.json 自動生成)
     Cmake,
+    /// .sln (Visual Studio Solution、複数の .vcxproj/.csproj をぶら下げる)
+    Sln,
+    /// .vcxproj 単独 (MSVC C++ プロジェクト)
     Vcxproj,
+    /// .csproj 単独 (C#) — clangd 対象外
+    Csproj,
     Unknown,
 }
 
@@ -127,23 +133,35 @@ fn walk_root(root_path: &Path) -> Result<ProjectInfo, ProjectError> {
 }
 
 fn detect_build_system(root: &Path) -> BuildSystem {
+    // 優先順位: CMakeLists.txt > .sln > .vcxproj > .csproj > Unknown
+    // .sln は複数の C++/C# project をぶら下げ得るので、単独の .vcxproj/.csproj
+    // より上位に置く。CMakeLists.txt は LSP 統合の主流なので最優先。
     if root.join("CMakeLists.txt").exists() {
         return BuildSystem::Cmake;
     }
-    if let Ok(entries) = std::fs::read_dir(root) {
-        for e in entries.flatten() {
+    let entries: Vec<_> = match std::fs::read_dir(root) {
+        Ok(it) => it.flatten().collect(),
+        Err(_) => return BuildSystem::Unknown,
+    };
+    let has_ext = |ext: &str| {
+        entries.iter().any(|e| {
             let p = e.path();
-            if p.is_file()
+            p.is_file()
                 && p.extension()
                     .and_then(|s| s.to_str())
-                    .map(|s| s.eq_ignore_ascii_case("vcxproj"))
+                    .map(|s| s.eq_ignore_ascii_case(ext))
                     .unwrap_or(false)
-            {
-                return BuildSystem::Vcxproj;
-            }
-        }
+        })
+    };
+    if has_ext("sln") {
+        BuildSystem::Sln
+    } else if has_ext("vcxproj") {
+        BuildSystem::Vcxproj
+    } else if has_ext("csproj") {
+        BuildSystem::Csproj
+    } else {
+        BuildSystem::Unknown
     }
-    BuildSystem::Unknown
 }
 
 fn walk(base: &Path, dir: &Path, depth: usize) -> Result<Vec<FileNode>, ProjectError> {
@@ -191,4 +209,61 @@ fn walk(base: &Path, dir: &Path, depth: usize) -> Result<Vec<FileNode>, ProjectE
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn touch(dir: &Path, name: &str) {
+        fs::write(dir.join(name), b"").unwrap();
+    }
+
+    #[test]
+    fn detects_cmake_when_cmakelists_present() {
+        let d = tempdir().unwrap();
+        touch(d.path(), "CMakeLists.txt");
+        touch(d.path(), "Foo.vcxproj"); // CMake が優先される
+        assert_eq!(detect_build_system(d.path()), BuildSystem::Cmake);
+    }
+
+    #[test]
+    fn detects_sln_over_vcxproj_and_csproj() {
+        let d = tempdir().unwrap();
+        touch(d.path(), "Solution.sln");
+        touch(d.path(), "App.vcxproj");
+        touch(d.path(), "Lib.csproj");
+        assert_eq!(detect_build_system(d.path()), BuildSystem::Sln);
+    }
+
+    #[test]
+    fn detects_vcxproj_only() {
+        let d = tempdir().unwrap();
+        touch(d.path(), "App.vcxproj");
+        assert_eq!(detect_build_system(d.path()), BuildSystem::Vcxproj);
+    }
+
+    #[test]
+    fn detects_csproj_only() {
+        let d = tempdir().unwrap();
+        touch(d.path(), "Lib.csproj");
+        assert_eq!(detect_build_system(d.path()), BuildSystem::Csproj);
+    }
+
+    #[test]
+    fn case_insensitive_extensions() {
+        let d = tempdir().unwrap();
+        touch(d.path(), "App.VcxProj");
+        assert_eq!(detect_build_system(d.path()), BuildSystem::Vcxproj);
+    }
+
+    #[test]
+    fn unknown_when_no_markers() {
+        let d = tempdir().unwrap();
+        touch(d.path(), "main.cpp");
+        touch(d.path(), "README.md");
+        assert_eq!(detect_build_system(d.path()), BuildSystem::Unknown);
+    }
 }
