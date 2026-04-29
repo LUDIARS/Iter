@@ -127,6 +127,150 @@ fn try_parse(line: &str) -> Option<(String, u32, Option<u32>, Option<String>)> {
     None
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_path_line_col_unix() {
+        let r = parse_path_line_col("/home/user/main.cpp:42:7").unwrap();
+        assert_eq!(r.0, "/home/user/main.cpp");
+        assert_eq!(r.1, 42);
+        assert_eq!(r.2, Some(7));
+    }
+
+    #[test]
+    fn parse_path_line_col_unix_no_col() {
+        let r = parse_path_line_col("/home/user/main.cpp:42").unwrap();
+        assert_eq!(r.0, "/home/user/main.cpp");
+        assert_eq!(r.1, 42);
+        assert_eq!(r.2, None);
+    }
+
+    #[test]
+    fn parse_path_line_col_windows_drive() {
+        let r = parse_path_line_col("C:/proj/src/main.cpp:99").unwrap();
+        assert_eq!(r.0, "C:/proj/src/main.cpp");
+        assert_eq!(r.1, 99);
+        assert_eq!(r.2, None);
+    }
+
+    #[test]
+    fn parse_path_line_col_invalid() {
+        assert!(parse_path_line_col("not a location").is_none());
+        assert!(parse_path_line_col("/foo").is_none());
+    }
+
+    #[test]
+    fn parses_v8_node_with_function() {
+        let txt = "    at myFunc (/home/u/app.js:12:5)";
+        let frames = parse_stack_trace(txt.to_string(), None);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].function.as_deref(), Some("myFunc"));
+        assert_eq!(frames[0].path, "/home/u/app.js");
+        assert_eq!(frames[0].line, 12);
+        assert_eq!(frames[0].column, Some(5));
+    }
+
+    #[test]
+    fn parses_v8_node_anonymous() {
+        let txt = "    at /home/u/app.js:1:1";
+        let frames = parse_stack_trace(txt.to_string(), None);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].function, None);
+        assert_eq!(frames[0].line, 1);
+    }
+
+    #[test]
+    fn parses_python_traceback() {
+        let txt = r#"  File "/srv/app/main.py", line 33, in handler"#;
+        let frames = parse_stack_trace(txt.to_string(), None);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].path, "/srv/app/main.py");
+        assert_eq!(frames[0].line, 33);
+        assert_eq!(frames[0].function.as_deref(), Some("handler"));
+    }
+
+    #[test]
+    fn parses_gcc_sanitizer() {
+        let txt = "    #0 0x7f00 in do_thing /work/src/foo.cpp:88:3";
+        let frames = parse_stack_trace(txt.to_string(), None);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].function.as_deref(), Some("do_thing"));
+        assert_eq!(frames[0].path, "/work/src/foo.cpp");
+        assert_eq!(frames[0].line, 88);
+        assert_eq!(frames[0].column, Some(3));
+    }
+
+    #[test]
+    fn parses_gdb_with_args() {
+        let txt = "#3  some_func (n=42, p=0x0) at /work/src/bar.c:120";
+        let frames = parse_stack_trace(txt.to_string(), None);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].function.as_deref(), Some("some_func"));
+        assert_eq!(frames[0].path, "/work/src/bar.c");
+        assert_eq!(frames[0].line, 120);
+    }
+
+    #[test]
+    fn parses_rust_panic_at_indent() {
+        let txt = "             at /work/src/lib.rs:55:9";
+        let frames = parse_stack_trace(txt.to_string(), None);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].path, "/work/src/lib.rs");
+        assert_eq!(frames[0].line, 55);
+        assert_eq!(frames[0].column, Some(9));
+    }
+
+    #[test]
+    fn skips_unparseable_lines() {
+        let txt = "this is some preamble\n\
+                   nothing matches here\n\
+                   ===========\n\
+                   ";
+        let frames = parse_stack_trace(txt.to_string(), None);
+        assert_eq!(frames.len(), 0);
+    }
+
+    #[test]
+    fn assigns_indices_in_order() {
+        let txt = "    at a (/x/a.js:1:1)\n    at b (/x/b.js:2:2)\n    at c (/x/c.js:3:3)";
+        let frames = parse_stack_trace(txt.to_string(), None);
+        assert_eq!(frames.len(), 3);
+        assert_eq!(frames[0].index, 0);
+        assert_eq!(frames[1].index, 1);
+        assert_eq!(frames[2].index, 2);
+    }
+
+    #[test]
+    fn in_project_flag_when_root_matches() {
+        let txt = "    at f (/work/proj/src/main.cpp:10:5)\n    at g (/sys/lib/x.cpp:1:1)";
+        let frames = parse_stack_trace(txt.to_string(), Some("/work/proj".to_string()));
+        assert_eq!(frames.len(), 2);
+        assert!(frames[0].in_project);
+        assert!(!frames[1].in_project);
+    }
+
+    #[test]
+    fn in_project_false_when_no_root() {
+        let txt = "    at f (/work/proj/src/main.cpp:10:5)";
+        let frames = parse_stack_trace(txt.to_string(), None);
+        assert!(!frames[0].in_project);
+    }
+
+    #[test]
+    fn handles_mixed_formats_in_one_input() {
+        let txt = "    at js_fn (/a/app.js:1:1)\n\
+                   #0 0x00 in c_fn /a/app.cpp:2:2\n\
+                   File \"/a/app.py\", line 3, in py_fn";
+        let frames = parse_stack_trace(txt.to_string(), None);
+        assert_eq!(frames.len(), 3);
+        assert_eq!(frames[0].path, "/a/app.js");
+        assert_eq!(frames[1].path, "/a/app.cpp");
+        assert_eq!(frames[2].path, "/a/app.py");
+    }
+}
+
 /// `path:line[:col]` を分解。Windows のドライブレター (`C:`) を想定して、
 /// **末尾から** コロンを探す。
 fn parse_path_line_col(s: &str) -> Option<(String, u32, Option<u32>)> {
