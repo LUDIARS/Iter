@@ -70,7 +70,10 @@ const SKIP_DIR_NAMES: &[&str] = &[
 const MAX_DEPTH: usize = 8;
 
 #[tauri::command]
-pub fn detect_project(root: String) -> Result<ProjectInfo, ProjectError> {
+pub fn detect_project(
+    app: tauri::AppHandle,
+    root: String,
+) -> Result<ProjectInfo, ProjectError> {
     let root_path = PathBuf::from(&root);
     if !root_path.exists() {
         return Err(ProjectError::NotFound(root));
@@ -78,6 +81,10 @@ pub fn detect_project(root: String) -> Result<ProjectInfo, ProjectError> {
     if !root_path.is_dir() {
         return Err(ProjectError::NotADirectory(root));
     }
+
+    // ユーザが選んだ project root を fs scope に動的追加。
+    // 静的 scope は $HOME 等に絞っていて、それ外の root はここで許可される。
+    crate::lsp_commands::expand_fs_scope(&app, &root_path);
 
     // キャッシュヒット (root mtime 一致) なら即返す
     if let Some(mut cached) = cache::try_load::<ProjectInfo>(&root_path) {
@@ -93,11 +100,15 @@ pub fn detect_project(root: String) -> Result<ProjectInfo, ProjectError> {
 
 /// 明示再走査 (キャッシュを破棄してから走査)。
 #[tauri::command]
-pub fn refresh_project(root: String) -> Result<ProjectInfo, ProjectError> {
+pub fn refresh_project(
+    app: tauri::AppHandle,
+    root: String,
+) -> Result<ProjectInfo, ProjectError> {
     let root_path = PathBuf::from(&root);
     if !root_path.exists() {
         return Err(ProjectError::NotFound(root));
     }
+    crate::lsp_commands::expand_fs_scope(&app, &root_path);
     cache::invalidate(&root_path);
     let info = walk_root(&root_path)?;
     let _ = cache::save(&root_path, &info);
