@@ -7,7 +7,7 @@ import { StackTraceGraph } from "./StackTraceGraph";
 
 interface ProjectInfo {
   root: string;
-  build_system: "cmake" | "vcxproj" | "unknown";
+  build_system: "cmake" | "sln" | "vcxproj" | "csproj" | "unknown";
   files: FileNode[];
   from_cache?: boolean;
 }
@@ -228,7 +228,8 @@ export function ControlPanel() {
             <FileTree nodes={project.files} onOpen={openFile} />
           ) : (
             <div className="cp-tree-empty">
-              「プロジェクトを開く」から CMakeLists.txt があるディレクトリを選択
+              「プロジェクトを開く」から CMakeLists.txt / .sln / .vcxproj / .csproj
+              があるディレクトリを選択
             </div>
           )}
         </div>

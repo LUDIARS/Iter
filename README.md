@@ -33,7 +33,7 @@ npm run tauri dev
 
 ## MVP (Phase 1) で動くこと
 
-- [x] CMakeLists.txt / *.vcxproj 検知
+- [x] CMakeLists.txt / *.sln / *.vcxproj / *.csproj 検知
 - [x] ファイルツリー表示 (Control Panel)
 - [x] ファイルクリックで個別ウインドウに Monaco Editor で開く
 - [x] 常時表示の検索バー (Ctrl+F でフォーカス + Monaco 上にハイライト)
