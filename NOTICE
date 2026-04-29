@@ -1,0 +1,35 @@
+Iter
+Copyright (c) 2026 LUDIARS
+
+Iter is licensed under the MIT License (see LICENSE).
+
+This product depends on third-party software, some of which is distributed
+under the Apache License 2.0. The Apache 2.0 attribution notices for those
+dependencies are reproduced in THIRD_PARTY_LICENSES.md.
+
+In particular, this product:
+
+  * Bundles the Monaco Editor (https://github.com/microsoft/monaco-editor),
+    Copyright (c) Microsoft Corporation, licensed under the MIT License.
+
+  * Builds against the Tauri framework
+    (https://github.com/tauri-apps/tauri),
+    Copyright (c) The Tauri Programme within The Commons Conservancy,
+    licensed under either Apache License 2.0 or MIT at the user's option.
+
+  * Bundles React Flow / @xyflow/react
+    (https://github.com/xyflow/xyflow),
+    Copyright (c) the xyflow team, licensed under the MIT License.
+
+  * Bundles React (https://github.com/facebook/react),
+    Copyright (c) Meta Platforms, Inc. and affiliates, licensed under the
+    MIT License.
+
+  * Optionally invokes clangd (https://github.com/clangd/clangd) as an
+    external subprocess at runtime. clangd is part of the LLVM Project
+    and is licensed under the Apache License 2.0 with LLVM Exceptions.
+    clangd binaries are NOT redistributed by Iter; the user installs
+    clangd separately.
+
+For the full text of each license and the per-package attribution, see
+THIRD_PARTY_LICENSES.md.
