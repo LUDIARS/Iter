@@ -34,6 +34,9 @@ npm run tauri dev
 ## MVP (Phase 1) で動くこと
 
 - [x] CMakeLists.txt / *.sln / *.vcxproj / *.csproj 検知
+- [x] CMakeLists.txt 不在時は `.iter/CMakeLists.txt` を仮想生成 (root 配下の
+      `*.cpp/*.cc/*.cxx/*.c` を STATIC ライブラリ、`*.h/*.hpp/*.hxx` の親
+      ディレクトリを include path として収集)
 - [x] ファイルツリー表示 (Control Panel)
 - [x] ファイルクリックで個別ウインドウに Monaco Editor で開く
 - [x] 常時表示の検索バー (Ctrl+F でフォーカス + Monaco 上にハイライト)
