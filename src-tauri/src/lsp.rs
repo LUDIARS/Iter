@@ -3,13 +3,17 @@
 //! - stdin/stdout で JSON-RPC、Content-Length ヘッダフレーミング
 //! - 1 プロジェクト = 1 clangd プロセス、`AppState` 配下に Arc<Mutex<Option<Client>>> で保持
 //! - フロントが叩く Tauri コマンドからは `Client::*` を await で呼ぶ
+//! - clangd プロセスを wait task で監視し、死亡時に `iter://lsp-down` を emit。
+//!   pending request は即時 error で drain し、`is_dead` を立てて以降の request も拒否
+//! - stderr は piped で受け、直近 STDERR_RING_CAP 行を保持。死亡通知に同梱
 //!
 //! Phase 2 の MVP では call hierarchy / references / definition の 3 系統だけ。
 //! semanticTokens / inlayHint / formatter 等は今回スコープ外。
 
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 use lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, ClientCapabilities,
@@ -17,17 +21,19 @@ use lsp_types::{
     ReferenceContext, ReferenceParams, TextDocumentIdentifier, TextDocumentItem,
     TextDocumentPositionParams, Uri, WorkDoneProgressParams, WorkspaceFolder,
 };
-use std::str::FromStr;
 use serde_json::{Value, json};
-use std::collections::HashMap;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, Command};
+use std::str::FromStr;
+use tauri::Emitter;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{ChildStdin, Command};
 use tokio::sync::{Mutex, oneshot};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LspError {
     #[error("clangd not found in PATH")]
     ClangdNotFound,
+    #[error("clangd exited unexpectedly: {0}")]
+    Dead(String),
     #[error("io: {0}")]
     Io(String),
     #[error("rpc: {0}")]
@@ -42,16 +48,23 @@ impl From<std::io::Error> for LspError {
 
 type Pending = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>;
 
+const STDERR_RING_CAP: usize = 100;
+
 pub struct ClangdClient {
-    _process: Child,
     stdin: Mutex<ChildStdin>,
     next_id: AtomicI64,
     pending: Pending,
+    is_dead: Arc<AtomicBool>,
 }
 
 impl ClangdClient {
     /// clangd を起動し、initialize / initialized を完了するまでブロックする。
-    pub async fn spawn(project_root: &Path, compile_commands_dir: &Path) -> Result<Self, LspError> {
+    /// `app` は wait task が `iter://lsp-down` イベントを emit するために使う。
+    pub async fn spawn(
+        project_root: &Path,
+        compile_commands_dir: &Path,
+        app: tauri::AppHandle,
+    ) -> Result<Self, LspError> {
         let clangd = which::which("clangd").map_err(|_| LspError::ClangdNotFound)?;
 
         let mut child = Command::new(clangd)
@@ -64,16 +77,33 @@ impl ClangdClient {
             .arg("--header-insertion=never")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
             .spawn()?;
 
         let stdin = child.stdin.take().expect("stdin captured");
         let stdout = child.stdout.take().expect("stdout captured");
+        let stderr = child.stderr.take().expect("stderr captured");
 
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
-        let pending_for_reader = pending.clone();
+        let stderr_ring: Arc<Mutex<VecDeque<String>>> =
+            Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_RING_CAP)));
+        let is_dead = Arc::new(AtomicBool::new(false));
 
-        // stdout reader タスク: 受信 → pending の oneshot へ流す
+        // stderr reader: 改行ごとにリングへ追加 (上限超過時は前から drop)
+        let stderr_ring_for_reader = stderr_ring.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let mut b = stderr_ring_for_reader.lock().await;
+                if b.len() >= STDERR_RING_CAP {
+                    b.pop_front();
+                }
+                b.push_back(line);
+            }
+        });
+
+        // stdout reader: 受信メッセージを pending の oneshot へ流す
+        let pending_for_reader = pending.clone();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
             loop {
@@ -99,16 +129,59 @@ impl ClangdClient {
             }
         });
 
+        // wait task: child の終了を待ち、死亡時に状態を更新 + フロントへ通知
+        let pending_for_wait = pending.clone();
+        let stderr_ring_for_wait = stderr_ring.clone();
+        let is_dead_for_wait = is_dead.clone();
+        let app_for_wait = app.clone();
+        tokio::spawn(async move {
+            let mut child = child;
+            let exit = child.wait().await;
+            is_dead_for_wait.store(true, Ordering::SeqCst);
+
+            let exit_desc = match &exit {
+                Ok(s) => match s.code() {
+                    Some(c) => format!("exit {c}"),
+                    None => "killed by signal".to_string(),
+                },
+                Err(e) => format!("wait failed: {e}"),
+            };
+            let recent: Vec<String> = stderr_ring_for_wait.lock().await.iter().cloned().collect();
+
+            // フロントに通知。emit 失敗 (window 全閉等) は致命ではない
+            let _ = app_for_wait.emit(
+                "iter://lsp-down",
+                json!({
+                    "reason": exit_desc,
+                    "stderr": recent,
+                }),
+            );
+
+            // pending を全部 error で drain (フロント側 hang 防止)
+            let mut p = pending_for_wait.lock().await;
+            for (_id, tx) in p.drain() {
+                let _ = tx.send(Err(format!("clangd exited: {exit_desc}")));
+            }
+        });
+
+        // stderr_ring は reader task と wait task が Arc で持ち合うので Self には保持しない
+        drop(stderr_ring);
+
         let client = Self {
-            _process: child,
             stdin: Mutex::new(stdin),
             next_id: AtomicI64::new(1),
             pending,
+            is_dead,
         };
 
         client.initialize(project_root).await?;
         client.initialized().await?;
         Ok(client)
+    }
+
+    /// clangd が既に死んでいるか。死亡監視 task が wait().await から返ったら true。
+    pub fn is_dead(&self) -> bool {
+        self.is_dead.load(Ordering::SeqCst)
     }
 
     async fn initialize(&self, project_root: &Path) -> Result<(), LspError> {
@@ -226,6 +299,9 @@ impl ClangdClient {
     }
 
     async fn request(&self, method: &str, params: Value) -> Result<Value, LspError> {
+        if self.is_dead() {
+            return Err(LspError::Dead("clangd is not running".to_string()));
+        }
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);
@@ -246,6 +322,9 @@ impl ClangdClient {
     }
 
     async fn notify(&self, method: &str, params: Value) -> Result<(), LspError> {
+        if self.is_dead() {
+            return Err(LspError::Dead("clangd is not running".to_string()));
+        }
         let msg = json!({
             "jsonrpc": "2.0",
             "method": method,

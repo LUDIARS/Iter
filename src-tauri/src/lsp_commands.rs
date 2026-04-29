@@ -6,7 +6,7 @@
 //!
 //! Phase 2 MVP では同時に 1 プロジェクトしか開けない (シングルトン)。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -14,6 +14,7 @@ use lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, Location, Uri,
 };
 use serde::Serialize;
+use tauri_plugin_fs::FsExt;
 use tokio::sync::Mutex;
 
 use crate::compile_db;
@@ -26,16 +27,20 @@ pub struct LspState {
 }
 
 /// プロジェクトを開いて clangd を起動する。compile_commands.json を必要なら生成。
+/// `app` は ClangdClient の wait task と動的 fs scope 拡張に使う。
 #[tauri::command]
 pub async fn lsp_open_project(
+    app: tauri::AppHandle,
     state: tauri::State<'_, LspState>,
     root: String,
 ) -> Result<(), String> {
     let root_path = PathBuf::from(&root);
+    expand_fs_scope(&app, &root_path);
+
     let cc = compile_db::ensure_compile_commands(&root_path)?;
     let cc_dir = cc.parent().map(PathBuf::from).unwrap_or(root_path.clone());
 
-    let client = ClangdClient::spawn(&root_path, &cc_dir)
+    let client = ClangdClient::spawn(&root_path, &cc_dir, app.clone())
         .await
         .map_err(|e| e.to_string())?;
     let arc = Arc::new(client);
@@ -43,6 +48,23 @@ pub async fn lsp_open_project(
     *state.client.lock().await = Some(arc);
     *state.project_root.lock().await = Some(root_path);
     Ok(())
+}
+
+/// `tauri-plugin-fs` の scope に project root を再帰許可で追加する。
+///
+/// 起動時の static scope は `$HOME` などユーザ data dir に絞っていて、それ以外
+/// (D:/projects/foo 等) はランタイムでこの関数が拡張する。失敗しても致命では
+/// なく warn のみ — その場合 frontend の readTextFile が拒否されてユーザに
+/// 見えるエラーになる。
+pub fn expand_fs_scope(app: &tauri::AppHandle, root: &Path) {
+    let scope = app.fs_scope();
+    if let Err(e) = scope.allow_directory(root, true) {
+        eprintln!(
+            "[fs-scope] failed to expand scope to {}: {}",
+            root.display(),
+            e
+        );
+    }
 }
 
 #[tauri::command]
