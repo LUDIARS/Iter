@@ -29,6 +29,8 @@ pub fn run() {
             lsp_commands::lsp_open_file,
             lsp_commands::lsp_call_hierarchy,
             lsp_commands::lsp_references,
+            lsp_commands::lsp_definitions,
+            lsp_commands::get_project_root,
             stack_trace::parse_stack_trace,
             snippet::read_snippet,
         ])

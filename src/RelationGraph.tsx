@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ReactFlow, Background, Controls, type Node, type Edge } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { fs, type CallHierarchyResult, type LspLocation, uriToPath } from "./lsp";
+import { isInProject } from "./utils";
 import {
   RelationCard,
   ensureCardStyles,
@@ -317,8 +318,4 @@ function makeEdge(
   };
 }
 
-function isInProject(path: string, root: string | null): boolean {
-  if (!root) return true;
-  const norm = (s: string) => s.replace(/\\/g, "/").toLowerCase();
-  return norm(path).startsWith(norm(root));
-}
+// isInProject は src/utils.ts に切り出し済 (重複を避けるため)。
