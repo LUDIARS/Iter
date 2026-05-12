@@ -1,9 +1,12 @@
-mod cache;
+// `pub mod` for cache / snippet so the benchmark crate (under `benches/`) can
+// reach them as `iter_lib::cache::try_load` / `iter_lib::snippet::read_snippet`.
+// 他の module は内部利用に閉じるため private のまま。
+pub mod cache;
 mod compile_db;
 mod lsp;
 mod lsp_commands;
 mod project;
-mod snippet;
+pub mod snippet;
 mod stack_trace;
 mod window;
 
@@ -29,6 +32,8 @@ pub fn run() {
             lsp_commands::lsp_open_file,
             lsp_commands::lsp_call_hierarchy,
             lsp_commands::lsp_references,
+            lsp_commands::lsp_definitions,
+            lsp_commands::get_project_root,
             stack_trace::parse_stack_trace,
             snippet::read_snippet,
         ])

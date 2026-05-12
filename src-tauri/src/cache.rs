@@ -85,15 +85,6 @@ fn cache_path(root: &Path) -> Option<PathBuf> {
     Some(dir.join(format!("{:x}.json", h.finish())))
 }
 
-fn root_mtime_secs(root: &Path) -> u64 {
-    std::fs::metadata(root)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 /// 走査対象とみなすファイル拡張子 + 特定ファイル名。 ここに無い拡張子は signature
 /// に寄与しない (= IDE の swap file / log 等の頻繁な変更で cache が無効化しないよう絞る)。
 fn is_relevant_file(path: &Path) -> bool {

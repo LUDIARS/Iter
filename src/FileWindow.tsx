@@ -4,7 +4,14 @@ import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type * as Monaco from "monaco-editor";
-import { lsp, win, uriToPath, type CallHierarchyResult, type LspLocation } from "./lsp";
+import {
+  lsp,
+  win,
+  uriToPath,
+  getProjectRoot,
+  type CallHierarchyResult,
+  type LspLocation,
+} from "./lsp";
 import { RelationGraph, type RelationData } from "./RelationGraph";
 
 interface Props {
@@ -297,14 +304,29 @@ export function FileWindow({ path, initialLine, initialCol, followDefinition }: 
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // project_root を Rust 共有 state から取得 (cross-window で同じ値を見る単一情報源)。
+  // 失敗時は legacy の localStorage に fallback (ControlPanel が detect 時に書き込む)。
+  const [projectRoot, setProjectRoot] = useState<string | null>(() =>
+    typeof window !== "undefined" ? localStorage.getItem(PROJECT_ROOT_KEY) : null,
+  );
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await getProjectRoot();
+        if (!cancelled && r) setProjectRoot(r);
+      } catch {
+        // LSP 未起動なら null。 localStorage fallback を維持
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   if (!path) {
     return <div className="fw-error">path クエリが指定されていません</div>;
   }
-
-  // project_root はセッション間で共有できないので localStorage 経由
-  // (ControlPanel が detect 時に保存するように Phase 2.5 で拡張予定)
-  const projectRoot =
-    typeof window !== "undefined" ? localStorage.getItem(PROJECT_ROOT_KEY) : null;
 
   return (
     <div className="fw-shell-2">

@@ -96,6 +96,15 @@ export const lsp = {
   },
 };
 
+/**
+ * 現在開いている project の root path を Rust shared state から取得する。
+ * `lsp_open_project` 後にのみ非 null。 cross-window で同じ値を見るための単一情報源。
+ */
+export async function getProjectRoot(): Promise<string | null> {
+  const r = await invoke<string | null>("get_project_root");
+  return r ?? null;
+}
+
 export const win = {
   async openFileWindow(path: string): Promise<void> {
     await invoke("open_file_window", { path });

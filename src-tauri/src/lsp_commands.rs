@@ -154,6 +154,16 @@ pub async fn lsp_definitions(
         .map_err(|e| e.to_string())
 }
 
+/// 現在開いている project root を返す (`lsp_open_project` 後に set される)。
+/// cross-window 共有のため、 frontend は localStorage ではなくこちらを参照する。
+#[tauri::command]
+pub async fn get_project_root(
+    state: tauri::State<'_, LspState>,
+) -> Result<Option<String>, String> {
+    let guard = state.project_root.lock().await;
+    Ok(guard.as_ref().map(|p| p.to_string_lossy().into_owned()))
+}
+
 fn path_to_uri(path: &str) -> Result<Uri, String> {
     let url = url::Url::from_file_path(path).map_err(|_| format!("invalid path: {path}"))?;
     Uri::from_str(url.as_str()).map_err(|e| format!("uri parse: {e}"))
