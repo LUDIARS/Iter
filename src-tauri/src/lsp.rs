@@ -298,6 +298,58 @@ impl ClangdClient {
         Ok(serde_json::from_value(v).unwrap_or_default())
     }
 
+    /// `textDocument/definition`。 clangd は次のいずれかを返す:
+    ///   - `Location` (単体)
+    ///   - `Location[]`
+    ///   - `LocationLink[]` (originSelectionRange / targetUri / targetRange / targetSelectionRange)
+    /// すべて `Vec<Location>` に正規化する。 `LocationLink` は `targetSelectionRange`
+    /// を優先 (シンボル名ハイライト位置)、 無ければ `targetRange`。
+    pub async fn definitions(
+        &self,
+        uri: Uri,
+        position: Position,
+    ) -> Result<Vec<Location>, LspError> {
+        let params = TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position,
+        };
+        let v = self
+            .request(
+                "textDocument/definition",
+                serde_json::to_value(params).unwrap(),
+            )
+            .await?;
+
+        fn from_link(item: &Value) -> Option<Location> {
+            let target_uri = item.get("targetUri")?.as_str()?;
+            let range = item
+                .get("targetSelectionRange")
+                .or_else(|| item.get("targetRange"))?
+                .clone();
+            let uri: Uri = Uri::from_str(target_uri).ok()?;
+            let range: lsp_types::Range = serde_json::from_value(range).ok()?;
+            Some(Location { uri, range })
+        }
+
+        let locs: Vec<Location> = match &v {
+            Value::Array(arr) => arr
+                .iter()
+                .filter_map(|item| {
+                    serde_json::from_value::<Location>(item.clone())
+                        .ok()
+                        .or_else(|| from_link(item))
+                })
+                .collect(),
+            Value::Object(_) => serde_json::from_value::<Location>(v.clone())
+                .ok()
+                .or_else(|| from_link(&v))
+                .map(|loc| vec![loc])
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        Ok(locs)
+    }
+
     async fn request(&self, method: &str, params: Value) -> Result<Value, LspError> {
         if self.is_dead() {
             return Err(LspError::Dead("clangd is not running".to_string()));

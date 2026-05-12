@@ -76,6 +76,18 @@ export const lsp = {
   ): Promise<LspLocation[]> {
     return invoke<LspLocation[]>("lsp_references", { path, line, character });
   },
+  /**
+   * 指定位置のシンボルの宣言/定義位置を返す。 clangd の
+   * `textDocument/definition` ラッパ。 `follow_definition` ジャンプと
+   * graph node からのワンクリック定義移動で使う。
+   */
+  async definitions(
+    path: string,
+    line: number,
+    character: number,
+  ): Promise<LspLocation[]> {
+    return invoke<LspLocation[]>("lsp_definitions", { path, line, character });
+  },
   async parseStackTrace(text: string, projectRoot?: string): Promise<StackFrame[]> {
     return invoke<StackFrame[]>("parse_stack_trace", {
       text,

@@ -4,7 +4,7 @@ import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type * as Monaco from "monaco-editor";
-import { lsp, win, type CallHierarchyResult, type LspLocation } from "./lsp";
+import { lsp, win, uriToPath, type CallHierarchyResult, type LspLocation } from "./lsp";
 import { RelationGraph, type RelationData } from "./RelationGraph";
 
 interface Props {
@@ -217,9 +217,32 @@ export function FileWindow({ path, initialLine, initialCol, followDefinition }: 
       editor.setPosition({ lineNumber: ln, column: col });
       editor.focus();
       if (followDefinition) {
-        // 宣言を追跡: 最初に LSP definitions を取り、結果が別ファイルなら open_at
-        // (Phase 2 では definitions を未公開なので references の最初を流用)
-        // → 簡易実装: relation query を 1 度走らせるだけにとどめる
+        // LSP definitions を非同期で取り、 別位置/別ファイルへ自動ジャンプする。
+        // 同一ファイル内なら editor 内移動、 別ファイルなら open_at で新 window。
+        // 失敗しても元の位置に留まるだけで害なし。
+        void (async () => {
+          try {
+            const defs = await lsp.definitions(path, ln - 1, col - 1);
+            if (defs.length === 0) return;
+            const def = defs[0]!;
+            const targetPath = uriToPath(def.uri);
+            const targetLine = def.range.start.line + 1;
+            const targetCol = def.range.start.character;
+            const samePath =
+              targetPath.toLowerCase() === path.toLowerCase();
+            if (samePath) {
+              editor.revealLineInCenter(targetLine);
+              editor.setPosition({
+                lineNumber: targetLine,
+                column: targetCol + 1,
+              });
+            } else {
+              await win.openAt(targetPath, targetLine, targetCol);
+            }
+          } catch (err) {
+            console.warn("follow_definition failed:", err);
+          }
+        })();
       }
     }
 

@@ -137,6 +137,23 @@ pub async fn lsp_references(
         .map_err(|e| e.to_string())
 }
 
+/// 指定位置の symbol の宣言/定義位置を返す。 `textDocument/definition` ラッパ。
+/// FileWindow の `follow_definition` フラグ実装と graph node からの定義ジャンプで使う。
+#[tauri::command]
+pub async fn lsp_definitions(
+    state: tauri::State<'_, LspState>,
+    path: String,
+    line: u32,
+    character: u32,
+) -> Result<Vec<Location>, String> {
+    let client = require_client(&state).await?;
+    let uri = path_to_uri(&path)?;
+    client
+        .definitions(uri, lsp_types::Position { line, character })
+        .await
+        .map_err(|e| e.to_string())
+}
+
 fn path_to_uri(path: &str) -> Result<Uri, String> {
     let url = url::Url::from_file_path(path).map_err(|_| format!("invalid path: {path}"))?;
     Uri::from_str(url.as_str()).map_err(|e| format!("uri parse: {e}"))
