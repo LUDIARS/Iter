@@ -1,0 +1,82 @@
+{
+  "repo": "iter",
+  "date": "2026-05-13",
+  "reviewer": "Claude (ludiars-review)",
+  "version_reviewed": "0.2.0",
+  "head_commit": "173778c",
+  "weighted_score": 82,
+  "overall_grade": "A-",
+  "grades": {
+    "design": "B+",
+    "vulnerability": "B",
+    "implementation": "A-",
+    "missing_features": "B",
+    "quality": "A-"
+  },
+  "counts": {
+    "total_issues": 26,
+    "high": 0,
+    "medium": 6,
+    "low": 18,
+    "info": 2,
+    "autofix_count": 0
+  },
+  "top_findings": [
+    {
+      "id": "I1",
+      "severity": "medium",
+      "category": "implementation",
+      "file": "src-tauri/src/snippet.rs",
+      "line": 18,
+      "title": "read_snippet が plugin-fs scope を経由せず std::fs::read_to_string を直接呼ぶ",
+      "recommendation": "project_root 配下 + symlink 拒否ガードを追加"
+    },
+    {
+      "id": "M3",
+      "severity": "medium",
+      "category": "missing",
+      "file": "src/FileWindow.tsx",
+      "line": 261,
+      "title": "save 後に textDocument/didChange/didSave が飛ばないため relation 結果が stale",
+      "recommendation": "lsp.didChange / didSave を save 内で呼ぶ"
+    },
+    {
+      "id": "M1",
+      "severity": "medium",
+      "category": "missing",
+      "file": "README.md",
+      "line": 44,
+      "title": "README の Phase 2 チェックボックスが実装状況を反映していない",
+      "recommendation": "実装済 3 項目を [x] に更新"
+    },
+    {
+      "id": "V1",
+      "severity": "medium",
+      "category": "vulnerability",
+      "file": "src-tauri/src/lsp_commands.rs",
+      "line": 59,
+      "title": "expand_fs_scope が static deny (~/.ssh 等) を含む root を許可する可能性",
+      "recommendation": "sensitive directory を含む root を拒否するガード"
+    },
+    {
+      "id": "Q1",
+      "severity": "low",
+      "category": "quality",
+      "file": "src-tauri/src/lsp.rs",
+      "line": 212,
+      "title": "serde_json::to_value(...).unwrap() が 8 箇所で多用される",
+      "recommendation": "? 演算子と LspError::Rpc に統一"
+    }
+  ],
+  "files_generated": [
+    "review/2026-05-13/REVIEW.md",
+    "review/2026-05-13/REVIEW_DESIGN.md",
+    "review/2026-05-13/REVIEW_VULNERABILITY.md",
+    "review/2026-05-13/REVIEW_IMPLEMENTATION.md",
+    "review/2026-05-13/REVIEW_MISSING_FEATURES.md",
+    "review/2026-05-13/REVIEW_QUALITY.md",
+    "review/2026-05-13/AUTOFIX.md",
+    "review/2026-05-13/latest.json"
+  ],
+  "notes": "Tauri 2 + clangd LSP + React + Monaco の v0.2 MVP は実装到達度が高い。 主リスクは snippet.rs の path traversal、 fs:scope の動的拡張順序、 編集後の LSP 同期欠落。 ソースコード修正は今回禁止のため AUTOFIX は列挙のみ (autofix_count=0)。"
+}
