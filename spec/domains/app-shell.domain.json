@@ -1,0 +1,20 @@
+{
+  "name": "app-shell",
+  "description": "アプリの器。 起動と配線、 ビルド定義、 自動テスト。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/main\\.tsx$"
+    },
+    {
+      "pathPattern": "(^|/)src-tauri/(?:.*/)?[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)tests?/(?:.*/)?[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)electron/(?:.*/)?[^/]+$"
+    }
+  ]
+}

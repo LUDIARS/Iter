@@ -1,0 +1,14 @@
+{
+  "name": "relation-analysis",
+  "description": "ソースコードの関連性解析。 LSP を介した caller/callee/参照の取得と正規化。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/lsp(?:\\.test)?\\.ts$"
+    },
+    {
+      "pathPattern": "(^|/)src/utils\\.ts$"
+    }
+  ]
+}

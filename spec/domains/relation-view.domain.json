@@ -1,0 +1,14 @@
+{
+  "name": "relation-view",
+  "description": "関連の可視化。 グラフ表示、 ファイル窓、 スタックトレース表示、 操作パネル。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/(?:[A-Z][A-Za-z0-9_-]*|file-window)\\.tsx$"
+    },
+    {
+      "pathPattern": "(^|/)src/[^/]+\\.css$"
+    }
+  ]
+}
