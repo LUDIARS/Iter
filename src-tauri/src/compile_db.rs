@@ -1,23 +1,19 @@
-//! `compile_commands.json` の検知 / 自動生成。
+//! `compile_commands.json` の検知 / 安全な自動生成。
 //!
 //! 検知ルール (優先順):
 //!   1. `<root>/compile_commands.json`
 //!   2. `<root>/build*/compile_commands.json` (浅く探索、`out/`, `cmake-build-debug/` 等)
-//!   3. CMakeLists.txt 有り + `cmake` コマンド有り → `<root>/build/` に生成
-//!   4. CMakeLists.txt 無し → 仮想 CMakeLists を `<root>/.iter/CMakeLists.txt` に
-//!      生成して `<root>/.iter/build/compile_commands.json` まで作る:
-//!         - `cmake` が PATH にある → cmake 経由で生成
-//!         - `cmake` が無い → 直接 `compile_commands.json` を書き出す (フォールバック)
+//!   3. `<root>/.iter/build/compile_commands.json` を source 走査から直接生成
 //!
-//! 仮想生成では root 配下の `.cpp/.cc/.cxx/.c` を source、`.h/.hpp/.hxx` の親
-//! ディレクトリを include path として収集する。`.git`、`node_modules`、`build`、
-//! `out`、`target`、`.iter` などは除外。
+//! CMakeLists.txt は対象ワークスペースが所有する入力なので、プロジェクトを開く際には
+//! 一切読み込まず、解釈も実行もしない。生成時は root 配下の `.cpp/.cc/.cxx/.c` を
+//! source、`.h/.hpp/.hxx` の親ディレクトリを include path として収集する。`.git`、
+//! `node_modules`、`build`、`out`、`target`、`.iter` などは除外。
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-const VIRTUAL_DIR: &str = ".iter";
+const ITER_DIR: &str = ".iter";
 const SKIP_DIRS: &[&str] = &[
     ".git",
     ".iter",
@@ -39,11 +35,7 @@ pub fn ensure_compile_commands(root: &Path) -> Result<PathBuf, String> {
     if let Some(p) = find_existing(root) {
         return Ok(p);
     }
-    if root.join("CMakeLists.txt").exists() {
-        return generate_via_cmake(root, root, &root.join("build"));
-    }
-    // CMakeLists 不在 → 仮想生成
-    ensure_virtual_compile_commands(root)
+    ensure_scanned_compile_commands(root)
 }
 
 fn find_existing(root: &Path) -> Option<PathBuf> {
@@ -64,12 +56,14 @@ fn find_existing(root: &Path) -> Option<PathBuf> {
     None
 }
 
-/// `<root>/.iter/CMakeLists.txt` を生成し、可能なら cmake で
-/// compile_commands.json まで作る。cmake が無ければ直接生成する。
-pub fn ensure_virtual_compile_commands(root: &Path) -> Result<PathBuf, String> {
-    let virtual_dir = root.join(VIRTUAL_DIR);
-    std::fs::create_dir_all(&virtual_dir).map_err(|e| format!(".iter dir 作成失敗: {e}"))?;
-    write_iter_gitignore(&virtual_dir);
+/// source 走査から `<root>/.iter/build/compile_commands.json` を直接生成する。
+///
+/// この関数は CMakeLists.txt を開かない。プロジェクトを選ぶだけで対象
+/// ワークスペースの CMake コードが実行されないようにするためである。
+fn ensure_scanned_compile_commands(root: &Path) -> Result<PathBuf, String> {
+    let iter_dir = root.join(ITER_DIR);
+    std::fs::create_dir_all(&iter_dir).map_err(|e| format!(".iter dir 作成失敗: {e}"))?;
+    write_iter_gitignore(&iter_dir);
 
     let scan = scan_sources(root)?;
     if scan.sources.is_empty() {
@@ -79,59 +73,7 @@ pub fn ensure_virtual_compile_commands(root: &Path) -> Result<PathBuf, String> {
         ));
     }
 
-    // 1) 仮想 CMakeLists.txt を生成 — cmake が無くても残しておけばユーザが手動で
-    //    使える + clangd の `--compile-commands-dir` で参照される可能性
-    write_virtual_cmakelists(&virtual_dir, root, &scan)?;
-
-    // 2) cmake があれば呼び出して compile_commands.json を作る
-    let virtual_build = virtual_dir.join("build");
-    if which::which("cmake").is_ok() {
-        std::fs::create_dir_all(&virtual_build)
-            .map_err(|e| format!(".iter/build dir 作成失敗: {e}"))?;
-        if let Ok(cc) = generate_via_cmake(root, &virtual_dir, &virtual_build) {
-            return Ok(cc);
-        }
-        // cmake 失敗時は静かに直接生成にフォールバック (cmake のエラーは将来 emit したい)
-    }
-
-    // 3) cmake が無い or 失敗 → 直接 compile_commands.json を書き出す
-    write_direct_compile_commands(&virtual_build, root, &scan)
-}
-
-fn generate_via_cmake(
-    source_dir: &Path,
-    cmakelists_dir: &Path,
-    build_dir: &Path,
-) -> Result<PathBuf, String> {
-    std::fs::create_dir_all(build_dir).map_err(|e| format!("build dir 作成失敗: {e}"))?;
-
-    let cmake = which::which("cmake").map_err(|_| {
-        "cmake コマンドが PATH に見つかりません (CMake をインストールするか、既存の compile_commands.json を root か build/ に置いてください)".to_string()
-    })?;
-
-    let output = Command::new(cmake)
-        .arg("-B")
-        .arg(build_dir)
-        .arg("-S")
-        .arg(cmakelists_dir)
-        .arg("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
-        .output()
-        .map_err(|e| format!("cmake 起動失敗: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("cmake 失敗 (exit {}): {}", output.status, stderr));
-    }
-
-    let cc = build_dir.join("compile_commands.json");
-    if !cc.exists() {
-        return Err(format!(
-            "cmake は完了したが {} が生成されませんでした (source_dir={})",
-            cc.display(),
-            source_dir.display()
-        ));
-    }
-    Ok(cc)
+    write_direct_compile_commands(&iter_dir.join("build"), &scan)
 }
 
 /// 走査結果。source ファイルの absolute path と include 候補ディレクトリ。
@@ -143,8 +85,7 @@ pub struct ScanResult {
 pub fn scan_sources(root: &Path) -> Result<ScanResult, String> {
     let mut sources = Vec::new();
     let mut includes = BTreeSet::new();
-    walk(root, root, 0, &mut sources, &mut includes)
-        .map_err(|e| format!("ソース走査失敗: {e}"))?;
+    walk(root, root, 0, &mut sources, &mut includes).map_err(|e| format!("ソース走査失敗: {e}"))?;
     sources.sort();
     Ok(ScanResult { sources, includes })
 }
@@ -197,71 +138,14 @@ fn walk(
     Ok(())
 }
 
-fn write_iter_gitignore(virtual_dir: &Path) {
-    let gi = virtual_dir.join(".gitignore");
+fn write_iter_gitignore(iter_dir: &Path) {
+    let gi = iter_dir.join(".gitignore");
     if !gi.exists() {
         let _ = std::fs::write(&gi, "# Iter が生成したファイル\n*\n");
     }
 }
 
-fn write_virtual_cmakelists(
-    virtual_dir: &Path,
-    root: &Path,
-    scan: &ScanResult,
-) -> Result<(), String> {
-    let mut s = String::new();
-    s.push_str("# Auto-generated by Iter — do not edit by hand.\n");
-    s.push_str("# Regenerated whenever the user opens a project without CMakeLists.txt.\n");
-    s.push_str("cmake_minimum_required(VERSION 3.10)\n");
-    s.push_str("project(IterVirtualProject LANGUAGES C CXX)\n");
-    s.push_str("set(CMAKE_EXPORT_COMPILE_COMMANDS ON)\n");
-    s.push_str("set(CMAKE_CXX_STANDARD 17)\n");
-    s.push_str("set(CMAKE_CXX_STANDARD_REQUIRED ON)\n");
-    s.push_str("set(CMAKE_C_STANDARD 11)\n\n");
-
-    s.push_str("add_library(iter_virtual STATIC\n");
-    for src in &scan.sources {
-        let rel = src.strip_prefix(root).unwrap_or(src);
-        s.push_str("  \"");
-        s.push_str(&cmake_path(rel));
-        s.push_str("\"\n");
-    }
-    s.push_str(")\n\n");
-
-    if !scan.includes.is_empty() {
-        s.push_str("target_include_directories(iter_virtual PRIVATE\n");
-        for inc in &scan.includes {
-            let rel = inc.strip_prefix(root).unwrap_or(inc);
-            // root 自身は \"\" に潰れるので . で表記
-            let rel_s = cmake_path(rel);
-            let rel_s = if rel_s.is_empty() {
-                ".".to_string()
-            } else {
-                rel_s
-            };
-            s.push_str("  \"");
-            s.push_str(&rel_s);
-            s.push_str("\"\n");
-        }
-        s.push_str(")\n");
-    }
-
-    let target = virtual_dir.join("CMakeLists.txt");
-    std::fs::write(&target, s).map_err(|e| format!("仮想 CMakeLists 書き込み失敗: {e}"))?;
-    Ok(())
-}
-
-/// CMakeLists 内のパス区切りはバックスラッシュを使うとエスケープ問題が出るため
-/// 強制的にスラッシュへ正規化する。
-fn cmake_path(p: &Path) -> String {
-    p.to_string_lossy().replace('\\', "/")
-}
-
-fn write_direct_compile_commands(
-    build_dir: &Path,
-    _root: &Path,
-    scan: &ScanResult,
-) -> Result<PathBuf, String> {
+fn write_direct_compile_commands(build_dir: &Path, scan: &ScanResult) -> Result<PathBuf, String> {
     std::fs::create_dir_all(build_dir).map_err(|e| format!("build dir 作成失敗: {e}"))?;
 
     let mut entries = Vec::with_capacity(scan.sources.len());
@@ -354,26 +238,14 @@ mod tests {
     }
 
     #[test]
-    fn virtual_cmakelists_lists_all_sources() {
+    fn uses_existing_compile_database_before_generating_one() {
         let d = tempdir().unwrap();
         let root = d.path();
-        write(&root.join("a.cpp"), "");
-        write(&root.join("sub/b.cc"), "");
-        write(&root.join("inc/h.h"), "");
+        let existing = root.join("compile_commands.json");
+        write(&existing, "[]");
 
-        let virtual_dir = root.join(VIRTUAL_DIR);
-        fs::create_dir_all(&virtual_dir).unwrap();
-        let scan = scan_sources(root).unwrap();
-        write_virtual_cmakelists(&virtual_dir, root, &scan).unwrap();
-
-        let body = fs::read_to_string(virtual_dir.join("CMakeLists.txt")).unwrap();
-        assert!(body.contains("project(IterVirtualProject"));
-        assert!(body.contains("CMAKE_EXPORT_COMPILE_COMMANDS ON"));
-        assert!(body.contains("a.cpp"));
-        assert!(body.contains("sub/b.cc"));
-        // include path に inc / sub / (root 自体)
-        assert!(body.contains("\"inc\""));
-        assert!(body.contains("\"sub\""));
+        assert_eq!(ensure_compile_commands(root).unwrap(), existing);
+        assert!(!root.join(ITER_DIR).exists());
     }
 
     #[test]
@@ -385,8 +257,8 @@ mod tests {
         write(&root.join("inc/h.h"), "");
 
         let scan = scan_sources(root).unwrap();
-        let build_dir = root.join(VIRTUAL_DIR).join("build");
-        let cc = write_direct_compile_commands(&build_dir, root, &scan).unwrap();
+        let build_dir = root.join(ITER_DIR).join("build");
+        let cc = write_direct_compile_commands(&build_dir, &scan).unwrap();
         let body = fs::read_to_string(&cc).unwrap();
 
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -397,31 +269,41 @@ mod tests {
             .iter()
             .map(|e| e.get("command").unwrap().as_str().unwrap())
             .collect();
-        assert!(cmds.iter().any(|c| c.starts_with("clang++") && c.contains("a.cpp")));
-        assert!(cmds.iter().any(|c| c.starts_with("clang ") && c.contains("b.c")));
+        assert!(cmds
+            .iter()
+            .any(|c| c.starts_with("clang++") && c.contains("a.cpp")));
+        assert!(cmds
+            .iter()
+            .any(|c| c.starts_with("clang ") && c.contains("b.c")));
         // include path が反映
         assert!(cmds.iter().all(|c| c.contains("-I")));
     }
 
     #[test]
-    fn ensure_virtual_creates_files_when_no_cmakelists() {
+    fn ensure_never_executes_target_cmakelists() {
         let d = tempdir().unwrap();
         let root = d.path();
         write(&root.join("main.cpp"), "");
+        let sentinel = root.join("cmake-executed");
+        write(
+            &root.join("CMakeLists.txt"),
+            r#"execute_process(
+  COMMAND "${CMAKE_COMMAND}" -E touch "${CMAKE_CURRENT_LIST_DIR}/cmake-executed"
+)"#,
+        );
 
-        let cc = ensure_virtual_compile_commands(root).unwrap();
-        // CMakeLists が .iter/ 配下に出来る (cmake が無くても直書きで build/ は出来る)
-        assert!(root.join(".iter/CMakeLists.txt").exists());
-        // cmake が無くても build/compile_commands.json は出来る
+        let cc = ensure_compile_commands(root).unwrap();
+        assert_eq!(cc, root.join(".iter/build/compile_commands.json"));
         assert!(cc.exists());
+        assert!(!sentinel.exists());
         let body = std::fs::read_to_string(&cc).unwrap();
         assert!(body.contains("main.cpp"));
     }
 
     #[test]
-    fn ensure_virtual_errors_when_no_sources() {
+    fn ensure_errors_when_no_sources() {
         let d = tempdir().unwrap();
-        let err = ensure_virtual_compile_commands(d.path()).unwrap_err();
+        let err = ensure_compile_commands(d.path()).unwrap_err();
         assert!(err.contains("ソースファイル"));
     }
 }
